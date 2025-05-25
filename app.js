@@ -249,6 +249,99 @@ app.put('/api/enrollments/:id/progress', authenticate, async (req, res) => {
 });
 
 // ======================
+// DASHBOARD ENDPOINTS
+// ======================
+
+// Get user stats
+app.get('/api/users/stats', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get active courses count
+    const { count: activeCourses } = await supabase
+      .from('enrollments')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+      .lt('progress', 100);
+
+    // Get average progress
+    const { data: progressData } = await supabase
+      .from('enrollments')
+      .select('progress')
+      .eq('user_id', userId);
+
+    const averageProgress = progressData.length > 0 
+      ? Math.round(progressData.reduce((sum, e) => sum + e.progress, 0) / progressData.length)
+      : 0;
+
+    // Get certificates count
+    const { count: certificates } = await supabase
+      .from('certificates')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId);
+
+    // Get discussions count (assuming you have a discussions table)
+    const { count: discussions } = await supabase
+      .from('discussions')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId);
+
+    res.json({
+      activeCourses,
+      averageProgress,
+      certificates,
+      discussions
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get user activity
+app.get('/api/users/activity', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get recent enrollments (course activity)
+    const { data: courseActivity } = await supabase
+      .from('enrollments')
+      .select('created_at, course:courses(title)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    // Get recent certificates
+    const { data: certificateActivity } = await supabase
+      .from('certificates')
+      .select('issued_at, course:courses(title)')
+      .eq('user_id', userId)
+      .order('issued_at', { ascending: false })
+      .limit(5);
+
+    // Combine and format activities
+    const activities = [
+      ...courseActivity.map(item => ({
+        type: item.progress === 100 ? 'course_completed' : 'course_started',
+        message: item.progress === 100 
+          ? `Completed course "${item.course.title}"` 
+          : `Started course "${item.course.title}"`,
+        timestamp: item.created_at
+      })),
+      ...certificateActivity.map(item => ({
+        type: 'certificate_earned',
+        message: `Earned certificate for "${item.course.title}"`,
+        timestamp: item.issued_at
+      }))
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+     .slice(0, 5);
+
+    res.json(activities);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ======================
 // START SERVER
 // ======================
 
